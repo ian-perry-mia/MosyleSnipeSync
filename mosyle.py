@@ -1,5 +1,10 @@
 import base64
 import requests
+import logging
+import pprint
+import sys
+
+logger = logging.getLogger("MosyleSnipeSync")
 
 class Mosyle:
 	
@@ -8,13 +13,23 @@ class Mosyle:
 		# Attribute the variable to the instance
 		self.url = url
 		self.request = requests.Session()
-		self.request.headers["accesstoken"] = key
-		#base64 encode username and password for basic auth
-		userpass = user + ':' + password
-		encoded_u = base64.b64encode(userpass.encode()).decode()
-		self.request.headers["Authorization"] = "Basic %s" % encoded_u
+		self.request.headers["accessToken"] = key
+		self.request.headers["Content-Type"] = "application/json"
 
-		
+		# Removed: Basic auth is deprecated.
+		# #base64 encode username and password for basic auth
+		# userpass = user + ':' + password
+		# encoded_u = base64.b64encode(userpass.encode()).decode()
+		# self.request.headers["Authorization"] = "Basic %s" % encoded_u
+
+		auth_data = {"email": user, "password": password}
+		resp = self.request.post(self.url + "/login", json=auth_data)
+		if resp.status_code == 200:
+			self.request.headers["Authorization"] = resp.headers['Authorization']
+		else:
+			logger.error("Failed to login: " + resp.text)
+
+
 	# Create variables requests
 	def list(self, os):
 		print("Listing devices for OS:", os)

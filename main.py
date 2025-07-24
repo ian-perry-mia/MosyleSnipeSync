@@ -3,12 +3,34 @@ import json
 import datetime
 import configparser
 import colorama
+import logging
+import argparse
+import pprint
 from sys import exit
 
 from mosyle import Mosyle
 from snipe import Snipe
 from colorama import Fore
 from colorama import Style
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument("-d", "--debug", action="store_true", help="Enable debugging output")
+parser.add_argument("-i", "--insecure", action="store_true", help="disable SSL verification for snipe-it")
+
+args = parser.parse_args()
+
+logger = logging.getLogger("MosyleSnipeSync")
+
+if args.debug:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.WARN)
+
+if args.insecure:
+    verify_ssl = False
+else:
+    verify_ssl = True
 
 # Converts datetim/e to timestamp for Mosyle
 ts = datetime.datetime.now().timestamp() - 200
@@ -43,7 +65,7 @@ mosyle = Mosyle(config['mosyle']['token'], config['mosyle']['url'], config['mosy
 calltype = config['mosyle']['calltype']
 
 #setup the snipe-it api
-snipe = Snipe(apiKey,snipe_url,apple_manufacturer_id,macos_category_id,ios_category_id,tvos_category_id,snipe_rate_limit, macos_fieldset_id, ios_fieldset_id, tvos_fieldset_id,apple_image_check)
+snipe = Snipe(apiKey,snipe_url,apple_manufacturer_id,macos_category_id,ios_category_id,tvos_category_id,snipe_rate_limit, macos_fieldset_id, ios_fieldset_id, tvos_fieldset_id,apple_image_check,verify_ssl=verify_ssl)
 
 for deviceType in deviceTypes:
     # Get the list of devices from Mosyle based on the deviceType and call type
@@ -53,7 +75,7 @@ for deviceType in deviceTypes:
     else:
         mosyle_response = mosyle.list(deviceType).json()
     
-    #print(mosyle_response)
+    logger.debug(pprint.pformat(mosyle_response))
     if 'status' in mosyle_response:
         if mosyle_response['status'] != "OK":
             print('There was an issue with the Mosyle API. Stopping.', mosyle_response['message'])
@@ -73,6 +95,10 @@ for deviceType in deviceTypes:
     print('Looping through Mosyle Hardware List')
     # Return Mosyle hardware and search them in snipe
     for sn in mosyle_response['response'][0]['devices']:
+        if sn['asset_tag'] is None:
+            pprint.pprint(sn['asset_tag'])
+            print("Device does not have an asset tag, please assign and then sync again.")
+            continue
         print('Sarting for Mosyle Device ', sn['device_name'])
         if sn['serial_number'] == None:
             print('There is no serial number here. It must be user enrolled?')
@@ -95,6 +121,7 @@ for deviceType in deviceTypes:
             if sn['os'] == "mac":
                 print('Making a new Mac model', sn['device_model'])
                 model = snipe.createModel(sn['device_model']).json()
+                pprint.pprint(model)
                 model = model['payload']['id']
             if sn['os'] == "ios":
                 print('Making a new ios model', sn['device_model'])
@@ -122,15 +149,15 @@ for deviceType in deviceTypes:
         devicePayload = snipe.buildPayloadFromMosyle(sn);
         
         # If asset doesnt exist create and assign it
-        if asset['total'] == 0:
-            asset = snipe.createAsset(model, devicePayload).json()
+        if ('messages' in asset and asset['messages'] == "Asset does not exist.") or ('total' in asset and asset['total'] == 0):
+            asset = snipe.createAsset(model, devicePayload, sn['asset_tag']).json()
             if mosyle_user != None:
                 print('Assigning asset to SnipIT user based on Mosyle Assignment')
                 snipe.assignAsset(mosyle_user, asset['payload']['id'])
                 continue
 
         # Update existing Devices              
-        print(asset)
+        pprint.pprint(asset)
         if asset['total'] == 1:
             #f"{x:.2f}"
             print('Asset ', sn['serial_number'],' already exists in SnipeIt. Update it.')

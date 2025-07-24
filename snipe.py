@@ -4,12 +4,17 @@ from unittest import result
 import requests
 import time
 import base64
+import pprint
+import sys
+import re
+import logging
 from colorama import Fore
 from colorama import Style
 
+logger = logging.getLogger("MosyleSnipeSync")
 
 class Snipe:
-    def __init__(self, snipetoken, url,manufacturer_id,macos_category_id,ios_category_id,tvos_category_id,rate_limit,macos_fieldset_id,ios_fieldset_id,tvos_fieldset_id,apple_image_check):
+    def __init__(self, snipetoken, url,manufacturer_id,macos_category_id,ios_category_id,tvos_category_id,rate_limit,macos_fieldset_id,ios_fieldset_id,tvos_fieldset_id,apple_image_check, verify_ssl = True):
         self.url = url
         self._snipetoken = snipetoken
         self.manufacturer_id = manufacturer_id
@@ -22,6 +27,36 @@ class Snipe:
         self.ios_fieldset_id = ios_fieldset_id
         self.tvos_fieldset_id = tvos_fieldset_id
         self.apple_image_check = apple_image_check
+        self.verify_ssl = verify_ssl
+        self.custom_fields = {}
+
+        # Handle expected custom fields.
+        # Fields we expect:
+        fields_to_create = [
+            'bluetooth_mac_address',
+            'cpu_model',
+            'percent_disk',
+            'available_disk',
+            'operating_system',
+            'operating_system_version',
+            'mac_address'
+        ]
+        fields = self.getCustomFields().json()
+        for row in fields['rows']:
+            field_name = re.search(r'_snipeit_(.*)_\d+', row['db_column_name'])
+            mat = field_name.group(1)
+            if mat is not None and mat in fields_to_create:
+                self.custom_fields[mat] = row['db_column_name']
+                fields_to_create.remove(mat)
+        for row in fields_to_create:
+            formatted_name = row.replace('mac', 'MAC').replace('_', ' ').capitalize()
+            ret = self.createCustomField(formatted_name)
+            if not ret.ok:
+                logger.error("Error creating field %s: %s", formatted_name, ret.text)
+            ret = ret.json()
+            if ret['status'] == "error" and ret['messages']['name'][0] != "The name has already been taken.":
+                logger.error("Error creating field %s: %s", formatted_name, ret.messages)
+            self.custom_fields[row] = ret['payload']['db_column']
 
     @property
     def headers(self):
@@ -74,36 +109,50 @@ class Snipe:
     
     def createModel(self, model):
 
-        imageResponse = self.getImageForModel(model);
-        if(imageResponse == False):
-            imageResponse = None
-
         payload = {
 			"name": model,
             "category_id": self.macos_category_id,
             "manufacturer_id": self.manufacturer_id,
             "model_number": model,
-            "fieldset_id": self.mac_os_fieldset_id,
-            "image":imageResponse
+            "fieldset_id": self.macos_fieldset_id
         }
+
+        imageResponse = self.getImageForModel(model);
+        if(imageResponse):
+            payload["image"] = imageResponse
+
+
+
 
         print('Creating Snipe Model with payload:', payload)
         results = self.snipeItRequest("POST", "/models", json = payload)
         #print('the server returned ', results);
         return results
+    
+    def createCustomField(self, name):
+        data = {"name": name, "element": "text"}
+        return self.snipeItRequest("POST", "/fields", json=data)
+    
+    def getCustomFields(self):
+        return self.snipeItRequest("GET", "/fields")
 
-    def createAsset(self, model, payload):
+    def createAsset(self, model, payload, asset_tag):
         print('Creating Snipe Hardware')
         print(payload);
-        payload['status_id'] = 2
+        payload['status_id'] = 3
         payload['model_id'] = model
+        payload['asset_tag'] = asset_tag
+        pprint.pprint(payload)
         
         asset = self.snipeItRequest("POST", "/hardware", json = payload).json()
-        #print(asset)
+        print("DEBUG ASSET =========")
+        pprint.pprint(asset)
         payload = {
             "serial": payload['serial']
         }
         return self.snipeItRequest("PATCH", "/hardware/" + str(asset['payload']['id']), json = payload)
+    
+
 
 
     def assignAsset(self, user, asset_id):
@@ -171,31 +220,31 @@ class Snipe:
             #"asset_tag": asset,
             "name": payload['device_name'],
             "serial": payload['serial_number'],
-            "_snipeit_bluetooth_mac_address_8": payload['bluetooth_mac_address']
+            self.custom_fields['bluetooth_mac_address']: payload['bluetooth_mac_address']
         }
         
         #lets get the proper os name
         if(payload['os'] == "mac"):
             os = "MacOS"
             #cpu stuff is only supplied by MacOS
-            finalPayload["_snipeit_cpu_family_7"]: payload['cpu_model']
+            finalPayload[self.custom_fields['cpu_model']]: payload['cpu_model']
 
-            finalPayload["_snipeit_percent_disk_5"]: payload['percent_disk'] + " GB"
-            finalPayload["_snipeit_available_disk_5"]: payload['available_disk'] + " GB"
+            finalPayload[self.custom_fields['percent_disk']]: payload['percent_disk'] + " GB"
+            finalPayload[self.custom_fields['available_disk']]: payload['available_disk'] + " GB"
         elif(payload['os'] == "ios"):
             os = "iOS"
-            finalPayload["_snipeit_percent_disk_5"]: payload['percent_disk'] + " GB"
-            finalPayload["_snipeit_available_disk_5"]: payload['available_disk'] + " GB"
+            finalPayload[self.custom_fields['percent_disk']]: payload['percent_disk'] + " GB"
+            finalPayload[self.custom_fields['available_disk']]: payload['available_disk'] + " GB"
         elif(payload['os'] == "tvos"):
             os = "tvos"
         else:
             os = "Not Known"
         
                 
-        finalPayload['_snipeit_operating_system_3'] = os
+        finalPayload[self.custom_fields['operating_system']] = os
         
         #set os version
-        finalPayload['_snipeit_operating_system_version_4'] = payload['osversion']
+        finalPayload[self.custom_fields['operating_system_version']] = payload['osversion']
         
         #macaddress stuff
         wifiMac = payload['wifi_mac_address']
@@ -203,9 +252,9 @@ class Snipe:
         
         #default to eithernet mac, if not, fall back to wifi mac. If neither, leave blank
         if(wifiMac != None and eithernetMac == None):
-            finalPayload['_snipeit_mac_address_1'] = wifiMac
+            finalPayload[self.custom_fields['mac_address']] = wifiMac
         elif(eithernetMac != None):
-            finalPayload['_snipeit_mac_address_1'] = eithernetMac
+            finalPayload[self.custom_fields['mac_address']] = eithernetMac
         
         return finalPayload
 
@@ -220,16 +269,16 @@ class Snipe:
 
         if(type == "GET"):
             print('Sending GET request to snipeit', url)
-            return requests.get(self.url + url, headers = self.headers, params = params)
+            return requests.get(self.url + url, headers = self.headers, params = params, verify=self.verify_ssl)
         elif(type == "POST"):
             print('Sending POST request to snipeit', url)
-            return requests.post(self.url + url, headers = self.headers, json = json)
+            return requests.post(self.url + url, headers = self.headers, json = json, verify=self.verify_ssl)
         elif(type == "PATCH"):
             print('Sending PATCH request to snipeit', url)
-            return requests.patch(self.url + url, headers = self.headers, json = json)
+            return requests.patch(self.url + url, headers = self.headers, json = json, verify=self.verify_ssl)
         elif(type == "DELETE"):
             print('Sending DELETE request to snipeit', url)
-            return requests.delete(self.url + url, headers = self.headers)
+            return requests.delete(self.url + url, headers = self.headers, verify=self.verify_ssl)
         else:
             print(Fore.RED+'Unknown request type'+Style.RESET_ALL)
             return None
@@ -237,7 +286,7 @@ class Snipe:
     def getImageForModel(self, modelNumber):
         if self.apple_image_check == True:
 
-            url = "https://img.appledb.dev/device@512/" + modelNumber + "/0.png"
+            url = "https://img.appledb.dev/device@main/" + modelNumber + "/Starlight.png"
             print("Get image from URL", url)
             try:
                 response = requests.get(url)
