@@ -42,13 +42,13 @@ class Mosyle:
 		# Concatanate url and send the request
 		return self.request.post(self.url + "/devices", json = params )
 
-	def listTimestamp(self, start, end, os):
+	def list_timestamp(self, start, end, os):
 		params = {
 			"operation": "list",
 			"options": {
 				"os": os,
 				"enrolldate_start": start,
-				"enrolldate_end": end	
+				"enrolldate_end": end    
 			}
 		}
 		return self.request.post(self.url + "/devices", json = params )

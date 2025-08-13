@@ -15,7 +15,7 @@ from colorama import Fore
 from colorama import Style
 from operator import mod
 
-modelNumber = "iPad11,2";
+model_number = "iPad11,2"
 
 # Converts datetim/e to timestamp for Mosyle
 ts = datetime.datetime.now().timestamp() - 200
@@ -25,28 +25,30 @@ config = configparser.ConfigParser()
 config.read('settings.ini')
 
 # This is the address, cname, or FQDN for your snipe-it instance.
-snipe_url = config['snipe-it']['url']
-apiKey = config['snipe-it']['apiKey']
-defaultStatus = config['snipe-it']['defaultStatus']
-apple_manufacturer_id = config['snipe-it']['manufacturer_id']
-macos_category_id = config['snipe-it']['macos_category_id']
-ios_category_id =  config['snipe-it']['ios_category_id']
-tvos_category_id =  config['snipe-it']['tvos_category_id']
-macos_fieldset_id = config['snipe-it']['macos_fieldset_id']
-ios_fieldset_id = config['snipe-it']['ios_fieldset_id']
-tvos_fieldset_id = config['snipe-it']['tvos_fieldset_id']
+apple_manufacturer_id = int(config['snipe-it']['manufacturer_id'])
+macos_category_id = int(config['snipe-it']['macos_category_id'])
+ios_category_id = int(config['snipe-it']['ios_category_id'])
+tvos_category_id = int(config['snipe-it']['tvos_category_id'])
+macos_fieldset_id = int(config['snipe-it']['macos_fieldset_id'])
+ios_fieldset_id = int(config['snipe-it']['ios_fieldset_id'])
+tvos_fieldset_id = int(config['snipe-it']['tvos_fieldset_id'])
 deviceTypes = config['mosyle']['deviceTypes'].split(',')
+
+snipe_url = config['snipe-it']['url']
+api_key = config['snipe-it']['apiKey']
+default_status = config['snipe-it']['defaultStatus']
+device_types = config['mosyle']['deviceTypes'].split(',')
 
 snipe_rate_limit = int(config['snipe-it']['rate_limit'])
 
-apple_image_check = config['snipe-it'].getboolean('apple_image_check')
+apple_image_check = bool(config['snipe-it'].getboolean('apple_image_check'))
 
 #setup the snipe-it api
-snipe = Snipe(apiKey,snipe_url,apple_manufacturer_id,macos_category_id,ios_category_id,tvos_category_id,snipe_rate_limit, macos_fieldset_id, ios_fieldset_id, tvos_fieldset_id,apple_image_check)
+snipe = Snipe(api_key, snipe_url, apple_manufacturer_id, macos_category_id, ios_category_id, tvos_category_id, snipe_rate_limit, macos_fieldset_id, ios_fieldset_id, tvos_fieldset_id, apple_image_check)
 
 
 #get all models
-models = snipe.listAllModels().json()
+models = snipe.list_all_models().json()
 print(models);
 #loop through each model
 for model in models['rows']:
@@ -59,7 +61,7 @@ for model in models['rows']:
         #Does it need a picture?
         if model['image'] == None:
             print("No photo. Dowloading photos")
-            imageResponse = snipe.getImageForModel(model["model_number"]);
+            imageResponse = snipe.get_image_for_model(model["model_number"])
             if imageResponse != False:
                 print("Photo Downloaded")
                 snipe.setImageForModel(model["id"],imageResponse.content)
@@ -67,7 +69,7 @@ for model in models['rows']:
                     "image": imageResponse
                 }
             
-                snipe.updateModel(str(model['id']), payload)
+                snipe.update_model(str(model['id']), payload)
             else:
                 print("no photo found, moving on")
         else:
